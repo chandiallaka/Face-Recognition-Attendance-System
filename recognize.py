@@ -5,129 +5,133 @@ import os
 from datetime import datetime
 import pyttsx3
 
-path = 'Attendence'  # Setting Path of Images
-Images = []  # To load all athe images form the folder to Images array
-ImageNames = []  # This array is to print the names in OP
-MyList = os.listdir('Attendence')  # Grabing the Images we can put path also inplace of attendence
+# FIX #8: Initialize pyttsx3 ONCE at the top, not inside the loop
+engine = pyttsx3.init()
+
+path = 'Attendence'  # Path of stored face images
+Images = []
+ImageNames = []
+
+# FIX #4 (partial): Only process valid image files, skip others like .DS_Store
+VALID_EXTENSIONS = ('.jpg', '.jpeg', '.png', '.bmp')
+MyList = [f for f in os.listdir(path) if f.lower().endswith(VALID_EXTENSIONS)]
+
 encodeList_saved = []
-# print(MyList)
 
 # Loading & Reading Images
-for cls in MyList:  # MyList has the list of all images in it & that will be there in cls also
-    curImg = face_recognition.load_image_file(f'{path}/{cls}')  # Readed image will be stored in curImg
-    # printing MyList & cls gives same o/p Images gives the readed file
+for cls in MyList:
+    curImg = face_recognition.load_image_file(f'{path}/{cls}')
     Images.append(curImg)
-    ImageNames.append(os.path.splitext(cls)[0])  # Adding images names into ImagesNames array w/o extensinon
-    # print(cls)
-# print(path)
-print(ImageNames)
+    ImageNames.append(os.path.splitext(cls)[0])
 
-print(type(ImageNames))
+print("Loaded images:", ImageNames)
 
 
 # Encoding of Images
 def findEncodings(Images):
-    for img in Images:
+    for idx, img in enumerate(Images):
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-        encode = face_recognition.face_encodings(img)[0]
-        encodeList_saved.append(encode)
-        print(encode)
+        encodings = face_recognition.face_encodings(img)
+        # FIX #4: Skip image if no face was detected (prevents IndexError crash)
+        if len(encodings) == 0:
+            print(f"WARNING: No face found in image '{ImageNames[idx]}'. Skipping.")
+            encodeList_saved.append(None)
+        else:
+            encodeList_saved.append(encodings[0])
     return encodeList_saved
 
 
-def markAttendence(name):
+# FIX #9 (typo fix): Renamed markAttendence → markAttendance
+def markAttendance(name):
     with open('Attendence.csv', 'a+') as f:
         myDataList = f.readlines()
         nameList = []
-        # print(myDataList)
         for line in myDataList:
             entry = line.split(',')
-            nameList.append(entry[0])
+            nameList.append(entry[0].strip())
         if name not in nameList:
             now = datetime.now()
             dtString = now.strftime('%H:%M:%S')
             f.writelines(f'\n{name},{dtString}')
+            print(f"Attendance marked for: {name} at {dtString}")
 
 
 encodeListKnown = findEncodings(Images)
-print(len(encodeListKnown))
-size = len(encodeListKnown)
-# print(encodeList_saved)
-print('Encoding Complete')
+# Remove None entries (images where no face was detected)
+valid_pairs = [(enc, name) for enc, name in zip(encodeListKnown, ImageNames) if enc is not None]
 
-cap = cv2.VideoCapture(0)  # Initializing web cap
+if len(valid_pairs) == 0:
+    print("ERROR: No valid face encodings found in the Attendence folder. Please add face images first.")
+    exit()
 
-i = 1
-value = "nomatch"
-markedlist = ["hello"]
+encodeListKnown, ImageNames = zip(*valid_pairs)
+encodeListKnown = list(encodeListKnown)
+ImageNames = list(ImageNames)
 
-marked = False
+print(f"Encoding complete. {len(encodeListKnown)} faces loaded.")
+
+cap = cv2.VideoCapture(0)  # FIX #5: Use camera index 0 (default camera)
+
+if not cap.isOpened():
+    print("ERROR: Could not open camera.")
+    exit()
+
+# Track which people have already had attendance marked this session
+markedlist = set()
+
 while True:
-    sucess, img = cap.read()  # dought about sucess
-    imgs = cv2.resize(img, (0, 0), None, 0.25, 0.25)  # reducing the size of image
-    imgs = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)  # finding the rgb
-
-    faceCurFrame = face_recognition.face_locations(imgs)  # finding locations because webcam may include many faces
-    encodeCurFrame = face_recognition.face_encodings(imgs,faceCurFrame)  # finding encodings of all images in the web ca
-    # matches = face_recognition.compare_faces(encodeListKnown,encodeCurFrame)
-    # cv2.rectangle(img, faceCurFrame([3], faceCurFrame[0]), (faceCurFrame[1], faceCurFrame[2]), (255, 0, 255), 2)  # adjusting borders
-
-    for encodeFace, faceLoc in zip(encodeCurFrame,faceCurFrame):  # finding the matches of all images captured in the web cam with our saved encodings
-        matches = face_recognition.compare_faces(encodeListKnown, encodeFace)
-        faceDis = face_recognition.face_distance(encodeListKnown, encodeFace)
-        print(faceDis)
-        '''print(faceDis.item(-1))
-        print(faceDis.item(-2))
-        print(faceDis.item(-3))
-        print(faceDis.item(0))
-        print(faceDis.item(1))
-        print(faceDis.item(2))'''
-
-        # score
-
-        # end score
-        matchIndex = np.argmin(faceDis)
-        name = ImageNames[matchIndex].upper()
-        if matches[matchIndex]:
-            lenth = len(markedlist)
-            #print(lenth)
-            # print(name)
-
-            if (value != name):
-                value = name
-                i = 1
-
-            if (value == name):
-                i = i + 1
-
-            #if(faceDis.item(0)<=0.4):
-
-        if (i % 3) == 0:
-            for x in range(lenth):
-                if (name == markedlist[x]):
-                    break
-                for i in range(size-1):
-                    if (x == (lenth - 1) and faceDis.item(i)<=0.4):
-                        y1, x2, y2, x1 = faceLoc
-                        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
-                        cv2.rectangle(img, (x1, y2 - 35), (x2, y2), (0, 255, 0), cv2.FILLED)
-                        cv2.putText(img, name, (x1 + 6, y2 - 6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
-                        print(name)
-                        markAttendence(name)
-                        engine = pyttsx3.init()
-                        engine.say(name + "your attendence is marked")
-                        markedlist.append(name)
-                        engine.runAndWait()
-    cv2.imshow('WebCam', img)
-
-    k = cv2.waitKey(1)
-    if (marked == True):
+    success, img = cap.read()
+    if not success:
+        print("Failed to read from camera.")
         break
 
+    # FIX #1 & #2: Correctly resize and convert the SAME variable (imgs)
+    imgs = cv2.resize(img, (0, 0), None, 0.25, 0.25)
+    imgs = cv2.cvtColor(imgs, cv2.COLOR_BGR2RGB)  # FIX: was cv2.cvtColor(img, ...) — wrong variable
+
+    faceCurFrame = face_recognition.face_locations(imgs)
+    encodeCurFrame = face_recognition.face_encodings(imgs, faceCurFrame)
+
+    for encodeFace, faceLoc in zip(encodeCurFrame, faceCurFrame):
+        matches = face_recognition.compare_faces(encodeListKnown, encodeFace)
+        faceDis = face_recognition.face_distance(encodeListKnown, encodeFace)
+
+        matchIndex = np.argmin(faceDis)
+
+        if matches[matchIndex] and faceDis[matchIndex] <= 0.5:
+            name = ImageNames[matchIndex].upper()
+
+            # FIX #2: Scale face location coordinates back up (×4) to match full-res frame
+            y1, x2, y2, x1 = faceLoc
+            y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
+
+            # Draw bounding box and name label
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            cv2.rectangle(img, (x1, y2 - 35), (x2, y2), (0, 255, 0), cv2.FILLED)
+            cv2.putText(img, name, (x1 + 6, y2 - 6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+
+            # FIX #3: Simplified and fixed attendance marking logic (removed broken nested loop)
+            if name not in markedlist:
+                markedlist.add(name)
+                markAttendance(name)
+                # FIX #8: Use the pre-initialized engine; FIX typo "your" → " your"
+                engine.say(name + " your attendance is marked")
+                engine.runAndWait()
+        else:
+            # Unknown face — draw red box
+            y1, x2, y2, x1 = faceLoc
+            y1, x2, y2, x1 = y1 * 4, x2 * 4, y2 * 4, x1 * 4
+            cv2.rectangle(img, (x1, y1), (x2, y2), (0, 0, 255), 2)
+            cv2.rectangle(img, (x1, y2 - 35), (x2, y2), (0, 0, 255), cv2.FILLED)
+            cv2.putText(img, "Unknown", (x1 + 6, y2 - 6), cv2.FONT_HERSHEY_COMPLEX, 1, (255, 255, 255), 2)
+
+    cv2.imshow('Face Recognition - Press ESC to quit', img)
+
+    k = cv2.waitKey(1)
     if k % 256 == 27:
-        # ESC pressed
         print("Escape hit, closing...")
         break
 
 cap.release()
 cv2.destroyAllWindows()
+print("Session ended. Marked attendance for:", list(markedlist))
